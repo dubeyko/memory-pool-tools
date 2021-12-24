@@ -1,0 +1,23 @@
+MEMORY POOL TOOLS
+
+* DESCRIPTION
+
+[TODO: add description]
+
+* TOOLS
+
+ (1) fpga-test    - FPGA tetsting tool.
+ (2) host-test    - host testing tool.
+
+* BEFORE COMPILATION
+
+ It needs to install the following packages:
+ (1) autoconf
+ (2) libtool
+
+* HOW TO COMPILE
+
+ $ cd memory-pool-tools
+ $ ./autogen.sh
+ $ ./configure
+ $ make
