@@ -2,6 +2,9 @@
 *                            CHANGELOG SECTION                                 *
 ********************************************************************************
 
+v.0.3 [December 27, 2021]
+    (*) [host-test] Add threads management logic.
+
 v.0.2 [December 26, 2021]
     (*) [host-test] Add parsing logic of options.
 

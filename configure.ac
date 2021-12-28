@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: BSD-3-Clause-Clear
 
 AC_PREREQ([2.69])
-AC_INIT(memory-pool-tools, 0.02, slava@dubeyko.com)
+AC_INIT(memory-pool-tools, 0.03, slava@dubeyko.com)
 AM_INIT_AUTOMAKE
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
@@ -20,6 +20,11 @@ AC_PROG_LIBTOOL
 AC_PROG_RANLIB
 
 # Checks for libraries.
+AC_CHECK_LIB([pthread], [pthread_create],
+		[AC_DEFINE([HAVE_LIBPTHREAD], 1,
+			   [Define to 1 if you have the 'pthread' library (-lthread).])],
+		[AC_MSG_ERROR([PTHREAD library not found])])
+AC_CHECK_HEADERS([pthread.h])
 
 # Checks for header files.
 AC_CHECK_HEADERS([fcntl.h limits.h paths.h stdlib.h string.h sys/ioctl.h unistd.h])
