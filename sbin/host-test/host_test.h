@@ -58,16 +58,90 @@ struct mempool_threads_descriptor {
 };
 
 /*
+ * struct mempool_item_descriptor - item descriptor
+ * @granularity: size of item in bytes
+ */
+struct mempool_item_descriptor {
+	int granularity;
+};
+
+/*
+ * struct mempool_record_descriptor - record descriptor
+ * @capacity: number of items in record
+ */
+struct mempool_record_descriptor {
+	int capacity;
+};
+
+/*
+ * struct mempool_portion_descriptor - portion/page descriptor
+ * @capacity: maximum number of records in one portion
+ * @count: real number of records in one portion
+ */
+struct mempool_portion_descriptor {
+	int capacity;
+	int count;
+};
+
+/*
+ * struct mempool_key_descriptor - key descriptor
+ * @mask: bitmap defines items in record are selected as key
+ */
+struct mempool_key_descriptor {
+	unsigned long long mask;
+};
+
+/*
+ * struct mempool_value_descriptor - value descriptor
+ * @mask: bitmap defines items in record are selected as value
+ */
+struct mempool_value_descriptor {
+	unsigned long long mask;
+};
+
+/*
+ * struct mempool_algorithm_descriptor - algorithm descriptor
+ * @id: algorithm ID
+ */
+struct mempool_algorithm_descriptor {
+	int id;
+};
+
+/* algorithm ID */
+enum {
+	MEMPOOL_UNKNOWN_ALGORITHM,
+	MEMPOOL_KEY_VALUE_ALGORITHM,
+	MEMPOOL_SORT_ALGORITHM,
+	MEMPOOL_TOTAL_ALGORITHM,
+	MEMPOOOL_ALGORITHM_ID_MAX
+};
+
+#define MEMPOOL_KEY_VALUE_ALGORITHM_STR		"KEY-VALUE"
+#define MEMPOOL_SORT_ALGORITHM_STR		"SORT"
+#define MEMPOOL_TOTAL_ALGORITHM_STR		"TOTAL"
+
+/*
  * struct mempool_host_test_environment - host test's environment
  * @input_file: input file
  * @output_file: output file
  * @threads: threads descriptor
+ * @item: item descriptor
+ * @record: record descriptor
+ * @portion: portion descriptor
+ * @key: key descriptor
+ * @value: value descriptor
  * @show_debug: show debug messages
  */
 struct mempool_host_test_environment {
 	struct mempool_file_descriptor input_file;
 	struct mempool_file_descriptor output_file;
 	struct mempool_threads_descriptor threads;
+	struct mempool_item_descriptor item;
+	struct mempool_record_descriptor record;
+	struct mempool_portion_descriptor portion;
+	struct mempool_key_descriptor key;
+	struct mempool_value_descriptor value;
+	struct mempool_algorithm_descriptor algorithm;
 
 	int show_debug;
 };

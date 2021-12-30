@@ -87,6 +87,13 @@ int main(int argc, char *argv[])
 	environment.output_file.name = NULL;
 	environment.threads.count = 0;
 	environment.threads.portion_size = 0;
+	environment.item.granularity = 1;
+	environment.record.capacity = 1;
+	environment.portion.capacity = 0;
+	environment.portion.count = 0;
+	environment.key.mask = 0;
+	environment.value.mask = 0;
+	environment.algorithm.id = MEMPOOL_UNKNOWN_ALGORITHM;
 	environment.show_debug = MEMPOOL_FALSE;
 
 	parse_options(argc, argv, &environment);
