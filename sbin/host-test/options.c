@@ -4,9 +4,9 @@
  *
  * sbin/options.c - parsing command line options functionality.
  *
- * Copyright (c) 2021 Viacheslav Dubeyko <slava@dubeyko.com>
- *                    Igor Kauranen <aatx12@gmail.com>
- *                    Evgenii Bushtyrev <eugene@bushtyrev.com>
+ * Copyright (c) 2021-2022 Viacheslav Dubeyko <slava@dubeyko.com>
+ *                         Igor Kauranen <aatx12@gmail.com>
+ *                         Evgenii Bushtyrev <eugene@bushtyrev.com>
  * All rights reserved.
  *
  * Authors: Vyacheslav Dubeyko <slava@dubeyko.com>

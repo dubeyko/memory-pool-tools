@@ -4,9 +4,9 @@
  *
  * sbin/fpga_test.c - implementation of FPGA testing tool.
  *
- * Copyright (c) 2021 Viacheslav Dubeyko <slava@dubeyko.com>
- *                    Igor Kauranen <aatx12@gmail.com>
- *                    Evgenii Bushtyrev <eugene@bushtyrev.com>
+ * Copyright (c) 2021-2022 Viacheslav Dubeyko <slava@dubeyko.com>
+ *                         Igor Kauranen <aatx12@gmail.com>
+ *                         Evgenii Bushtyrev <eugene@bushtyrev.com>
  * All rights reserved.
  *
  * Authors: Vyacheslav Dubeyko <slava@dubeyko.com>
