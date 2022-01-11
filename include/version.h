@@ -2,6 +2,6 @@
 #ifndef _MEMORY_POOL_TOOLS_VERSION_H
 #define _MEMORY_POOL_TOOLS_VERSION_H
 
-#define MEMPOOL_TOOLS_VERSION "memory-pool-tools v.0.06"
+#define MEMPOOL_TOOLS_VERSION "memory-pool-tools v.0.07"
 
 #endif /* _MEMORY_POOL_TOOLS_VERSION_H */

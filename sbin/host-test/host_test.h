@@ -100,6 +100,16 @@ struct mempool_value_descriptor {
 };
 
 /*
+ * struct mempool_condition_descriptor - condition descriptor
+ * @min: lower bound
+ * @max: upper bound
+ */
+struct mempool_condition_descriptor {
+	unsigned long long min;
+	unsigned long long max;
+};
+
+/*
  * struct mempool_algorithm_descriptor - algorithm descriptor
  * @id: algorithm ID
  */
@@ -112,12 +122,14 @@ enum {
 	MEMPOOL_UNKNOWN_ALGORITHM,
 	MEMPOOL_KEY_VALUE_ALGORITHM,
 	MEMPOOL_SORT_ALGORITHM,
+	MEMPOOL_SELECT_ALGORITHM,
 	MEMPOOL_TOTAL_ALGORITHM,
 	MEMPOOOL_ALGORITHM_ID_MAX
 };
 
 #define MEMPOOL_KEY_VALUE_ALGORITHM_STR		"KEY-VALUE"
 #define MEMPOOL_SORT_ALGORITHM_STR		"SORT"
+#define MEMPOOL_SELECT_ALGORITHM_STR		"SELECT"
 #define MEMPOOL_TOTAL_ALGORITHM_STR		"TOTAL"
 
 /*
@@ -130,6 +142,7 @@ enum {
  * @portion: portion descriptor
  * @key: key descriptor
  * @value: value descriptor
+ * @condition: condition descriptor
  * @show_debug: show debug messages
  */
 struct mempool_host_test_environment {
@@ -141,6 +154,7 @@ struct mempool_host_test_environment {
 	struct mempool_portion_descriptor portion;
 	struct mempool_key_descriptor key;
 	struct mempool_value_descriptor value;
+	struct mempool_condition_descriptor condition;
 	struct mempool_algorithm_descriptor algorithm;
 
 	int show_debug;

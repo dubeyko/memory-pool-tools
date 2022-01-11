@@ -952,15 +952,246 @@ finish_algorithm:
 }
 
 static
-int mempool_total_algorithm(struct mempool_thread_state *state)
+unsigned long long mempool_get_input_key(struct mempool_thread_state *state,
+					 int record_index)
 {
-	MEMPOOL_ERR("unsupported algorithm %#x: "
+	unsigned int record_size;
+	unsigned long long mask = state->env->key.mask;
+	unsigned long long key = 0;
+	unsigned char *input;
+	unsigned char *output;
+	size_t written_bytes = 0;
+	int i;
+
+	if (state->env->portion.count > state->env->portion.capacity) {
+		MEMPOOL_ERR("invalid portion descriptor: "
+			    "thread %d, count %d, capacity %d\n",
+			    state->id,
+			    state->env->portion.count,
+			    state->env->portion.capacity);
+		return 0;
+	}
+
+	if (record_index >= state->env->portion.count) {
+		MEMPOOL_ERR("out of range: "
+			    "thread %d, record_index %d, count %d\n",
+			    state->id,
+			    record_index,
+			    state->env->portion.count);
+		return 0;
+	}
+
+	record_size = (unsigned int)state->env->record.capacity *
+					state->env->item.granularity;
+
+	for (i = 0; i < state->env->record.capacity; i++) {
+		input = (unsigned char *)state->input_portion;
+		input += (unsigned int)record_index * record_size;
+		input += (unsigned int)i * state->env->item.granularity;
+
+		if (written_bytes >= sizeof(unsigned long long))
+			return key;
+
+		output = (unsigned char *)&key;
+		output += written_bytes;
+
+		if (is_bit_set(mask, i, state->env->record.capacity)) {
+			memcpy(output, input, state->env->item.granularity);
+			written_bytes += state->env->item.granularity;
+		}
+	}
+
+	return key;
+}
+
+
+static
+int mempool_select_algorithm(struct mempool_thread_state *state)
+{
+	unsigned int record_size;
+	unsigned int portion_bytes;
+	size_t written_bytes = 0;
+	unsigned long long min;
+	unsigned long long max;
+	int i;
+	int err;
+
+	MEMPOOL_DBG(state->env->show_debug,
 		    "thread %d, input %p, output %p\n",
-		    state->env->algorithm.id,
 		    state->id,
 		    state->input_portion,
 		    state->output_portion);
-	return -EOPNOTSUPP;
+
+	record_size = (unsigned int)state->env->record.capacity *
+					state->env->item.granularity;
+	portion_bytes = record_size * state->env->portion.capacity;
+	min = state->env->condition.min;
+	max = state->env->condition.max;
+
+	memset(state->output_portion, 0, portion_bytes);
+
+	for (i = 0; i < state->env->portion.count; i++) {
+		unsigned long long key = 0;
+
+		if ((written_bytes + record_size) > portion_bytes) {
+			MEMPOOL_ERR("out of space: "
+				    "thread %d, written_bytes %zu, "
+				    "portion_bytes %u\n",
+				    state->id,
+				    written_bytes,
+				    portion_bytes);
+			return -E2BIG;
+		}
+
+		key = mempool_get_input_key(state, i);
+
+		MEMPOOL_DBG(state->env->show_debug,
+			    "thread %d, key %llu, min %llu, max %llu\n",
+			    state->id,
+			    key, min, max);
+
+		if (min <= key && key < max) {
+			err = mempool_copy_key(state, i, &written_bytes);
+			if (err) {
+				MEMPOOL_ERR("fail to copy key: "
+					    "thread %d, record_index %d, "
+					    "written_bytes %zu, err %d\n",
+					    state->id, i, written_bytes, err);
+				return err;
+			}
+
+			err = mempool_copy_value(state, i, &written_bytes);
+			if (err) {
+				MEMPOOL_ERR("fail to copy value: "
+					    "thread %d, record_index %d, "
+					    "written_bytes %zu, err %d\n",
+					    state->id, i, written_bytes, err);
+				return err;
+			}
+		}
+	}
+
+	return 0;
+}
+
+static
+int mempool_add_value(struct mempool_thread_state *state,
+		      unsigned long long mask,
+		      int record_index, size_t *written_bytes)
+{
+	unsigned int record_size;
+	unsigned char *input;
+	unsigned long long *output;
+	int value_items = 0;
+	int i;
+
+	MEMPOOL_DBG(state->env->show_debug,
+		    "thread %d, mask %#llx, "
+		    "record_index %d, written_bytes %zu\n",
+		    state->id, mask, record_index, *written_bytes);
+
+	if (!state->input_portion || !state->output_portion) {
+		MEMPOOL_ERR("fail to copy key: "
+			    "thread %d, input_portion %p, output_portion %p\n",
+			    state->id,
+			    state->input_portion,
+			    state->output_portion);
+		return -ERANGE;
+	}
+
+	if (state->env->portion.count > state->env->portion.capacity) {
+		MEMPOOL_ERR("invalid portion descriptor: "
+			    "thread %d, count %d, capacity %d\n",
+			    state->id,
+			    state->env->portion.count,
+			    state->env->portion.capacity);
+		return -ERANGE;
+	}
+
+	if (record_index >= state->env->portion.count) {
+		MEMPOOL_ERR("out of range: "
+			    "thread %d, record_index %d, count %d\n",
+			    state->id,
+			    record_index,
+			    state->env->portion.count);
+		return -ERANGE;
+	}
+
+	record_size = (unsigned int)state->env->record.capacity *
+					state->env->item.granularity;
+
+	for (i = 0; i < state->env->record.capacity; i++) {
+		if (is_bit_set(mask, i, state->env->record.capacity))
+			value_items++;
+	}
+
+	*written_bytes = 0;
+
+	if (value_items == 0)
+		return 0;
+
+	for (i = 0; i < state->env->record.capacity; i++) {
+		input = (unsigned char *)state->input_portion;
+		input += (unsigned int)record_index * record_size;
+		input += (unsigned int)i * state->env->item.granularity;
+
+		output = (unsigned long long *)state->output_portion;
+		output += i;
+
+		if (is_bit_set(mask, i, state->env->record.capacity)) {
+			*output += *input;
+		}
+	}
+
+	*written_bytes = state->env->item.granularity * value_items;
+
+	return 0;
+}
+
+static
+int mempool_total_algorithm(struct mempool_thread_state *state)
+{
+	unsigned int record_size;
+	unsigned int portion_bytes;
+	size_t written_bytes = 0;
+	int i;
+	int err;
+
+	MEMPOOL_DBG(state->env->show_debug,
+		    "thread %d, input %p, output %p\n",
+		    state->id,
+		    state->input_portion,
+		    state->output_portion);
+
+	record_size = (unsigned int)state->env->record.capacity *
+					state->env->item.granularity;
+	portion_bytes = record_size * state->env->portion.capacity;
+
+	memset(state->output_portion, 0, portion_bytes);
+
+	for (i = 0; i < state->env->portion.count; i++) {
+		if ((written_bytes + record_size) > portion_bytes) {
+			MEMPOOL_ERR("out of space: "
+				    "thread %d, written_bytes %zu, "
+				    "portion_bytes %u\n",
+				    state->id,
+				    written_bytes,
+				    portion_bytes);
+			return -E2BIG;
+		}
+
+		err = mempool_add_value(state, state->env->value.mask,
+					i, &written_bytes);
+		if (err) {
+			MEMPOOL_ERR("fail to add value: "
+				    "thread %d, record_index %d, "
+				    "written_bytes %zu, err %d\n",
+				    state->id, i, written_bytes, err);
+			return err;
+		}
+	}
+
+	return 0;
 }
 
 void *ThreadFunc(void *arg)
@@ -996,6 +1227,18 @@ void *ThreadFunc(void *arg)
 		state->err = mempool_sort_algorithm(state);
 		if (state->err) {
 			MEMPOOL_ERR("sort algorithm failed: "
+				    "thread %d, input %p, output %p, err %d\n",
+				    state->id,
+				    state->input_portion,
+				    state->output_portion,
+				    state->err);
+		}
+		break;
+
+	case MEMPOOL_SELECT_ALGORITHM:
+		state->err = mempool_select_algorithm(state);
+		if (state->err) {
+			MEMPOOL_ERR("select algorithm failed: "
 				    "thread %d, input %p, output %p, err %d\n",
 				    state->id,
 				    state->input_portion,
@@ -1066,6 +1309,8 @@ int main(int argc, char *argv[])
 	environment.portion.count = 0;
 	environment.key.mask = 0;
 	environment.value.mask = 0;
+	environment.condition.min = 0;
+	environment.condition.max = ULLONG_MAX;
 	environment.algorithm.id = MEMPOOL_UNKNOWN_ALGORITHM;
 	environment.show_debug = MEMPOOL_FALSE;
 

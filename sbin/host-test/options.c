@@ -48,8 +48,10 @@ void print_usage(void)
 		     "define portion.\n");
 	MEMPOOL_INFO("\t [-k|--key mask=value]\t\t  define key.\n");
 	MEMPOOL_INFO("\t [-v|--value mask=value]\t\t  define value.\n");
+	MEMPOOL_INFO("\t [-c|--condition min=value,max=value]\t\t  "
+		     "define condition.\n");
 	MEMPOOL_INFO("\t [-a|--algorithm]\t\t  define algorithm "
-		     "[KEY-VALUE|SORT|TOTAL].\n");
+		     "[KEY-VALUE|SORT|SELECT|TOTAL].\n");
 	MEMPOOL_INFO("\t [-V|--version]\t\t  print version and exit.\n");
 }
 
@@ -81,6 +83,8 @@ int convert_string2algorithm(const char *str)
 		return MEMPOOL_KEY_VALUE_ALGORITHM;
 	else if (strcmp(str, MEMPOOL_SORT_ALGORITHM_STR) == 0)
 		return MEMPOOL_SORT_ALGORITHM;
+	else if (strcmp(str, MEMPOOL_SELECT_ALGORITHM_STR) == 0)
+		return MEMPOOL_SELECT_ALGORITHM;
 	else if (strcmp(str, MEMPOOL_TOTAL_ALGORITHM_STR) == 0)
 		return MEMPOOL_TOTAL_ALGORITHM;
 	else
@@ -93,9 +97,10 @@ void parse_options(int argc, char *argv[],
 	int c;
 	int oi = 1;
 	char *p;
-	char sopts[] = "a:dhi:I:o:p:k:r:t:v:V";
+	char sopts[] = "a:c:dhi:I:o:p:k:r:t:v:V";
 	static const struct option lopts[] = {
 		{"algorithm", 1, NULL, 'a'},
+		{"condition", 1, NULL, 'c'},
 		{"debug", 0, NULL, 'd'},
 		{"help", 0, NULL, 'h'},
 		{"input-file", 1, NULL, 'i'},
@@ -153,6 +158,15 @@ void parse_options(int argc, char *argv[],
 	};
 	char *const value_tokens[] = {
 		[VALUE_MASK_OPT]		= "mask",
+		NULL
+	};
+	enum {
+		CONDITION_MIN_OPT = 0,
+		CONDITION_MAX_OPT,
+	};
+	char *const condition_tokens[] = {
+		[CONDITION_MIN_OPT]		= "min",
+		[CONDITION_MAX_OPT]		= "max",
 		NULL
 	};
 
@@ -297,6 +311,25 @@ void parse_options(int argc, char *argv[],
 				print_usage();
 				exit(EXIT_SUCCESS);
 			}
+			break;
+		case 'c':
+			p = optarg;
+			while (*p != '\0') {
+				char *value;
+
+				switch (getsubopt(&p, condition_tokens, &value)) {
+				case CONDITION_MIN_OPT:
+					env->condition.min = atoll(value);
+					break;
+				case CONDITION_MAX_OPT:
+					env->condition.max = atoll(value);
+					break;
+				default:
+					MEMPOOL_ERR("invalid condition option\n");
+					print_usage();
+					exit(EXIT_FAILURE);
+				};
+			};
 			break;
 		case 'V':
 			print_version();
