@@ -74,7 +74,7 @@ enum {
 struct mempool_thread_state {
 	int id;
 	pthread_t thread;
-	struct mempool_host_test_environment *env;
+	struct mempool_test_environment *env;
 	void *input_portion;
 	void *output_portion;
 	void *buf;
@@ -1284,7 +1284,7 @@ void *ThreadFunc(void *arg)
 
 int main(int argc, char *argv[])
 {
-	struct mempool_host_test_environment environment;
+	struct mempool_test_environment environment;
 	struct mempool_thread_state *pool = NULL;
 	struct mempool_thread_state *cur;
 	void *input_addr = NULL;
