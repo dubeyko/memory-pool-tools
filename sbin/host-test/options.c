@@ -42,10 +42,12 @@ void print_usage(void)
 	MEMPOOL_INFO("\t [-o|--output-file]\t\t  define output file.\n");
 	MEMPOOL_INFO("\t [-t|--thread number=value, "
 		     "portion-size=value]\t\t  define threads.\n");
-	MEMPOOL_INFO("\t [-I|--item granularity=value]\t\t  define item.\n");
-	MEMPOOL_INFO("\t [-r|--record capacity=value]\t\t  define record.\n");
+	MEMPOOL_INFO("\t [-I|--item granularity=value]\t\t  "
+		     "define item size in bytes.\n");
+	MEMPOOL_INFO("\t [-r|--record capacity=value]\t\t  "
+		     "define number of items in record.\n");
 	MEMPOOL_INFO("\t [-p|--portion capacity=value,count=value]\t\t  "
-		     "define portion.\n");
+		     "define number of records in portion.\n");
 	MEMPOOL_INFO("\t [-k|--key mask=value]\t\t  define key.\n");
 	MEMPOOL_INFO("\t [-v|--value mask=value]\t\t  define value.\n");
 	MEMPOOL_INFO("\t [-c|--condition min=value,max=value]\t\t  "

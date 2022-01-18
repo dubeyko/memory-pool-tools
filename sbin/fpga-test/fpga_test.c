@@ -34,10 +34,116 @@
 
 #include "fpga_test.h"
 
+static
+int mempool_write_data_into_fpga(struct mempool_test_environment *env,
+				 void *input_addr, off_t file_size)
+{
+	MEMPOOL_ERR("unsupported algorithm\n");
+	return -EOPNOTSUPP;
+}
+
+static
+int mempool_read_result_from_fpga(struct mempool_test_environment *env,
+				  void *output_addr, off_t file_size)
+{
+	MEMPOOL_ERR("unsupported algorithm\n");
+	return -EOPNOTSUPP;
+}
+
+static
+int mempool_fpga_key_value_algorithm(struct mempool_test_environment *env)
+{
+	MEMPOOL_ERR("unsupported algorithm %#x\n",
+		    env->algorithm.id);
+	return -EOPNOTSUPP;
+}
+
+static
+int mempool_fpga_sort_algorithm(struct mempool_test_environment *env)
+{
+	MEMPOOL_ERR("unsupported algorithm %#x\n",
+		    env->algorithm.id);
+	return -EOPNOTSUPP;
+}
+
+static
+int mempool_fpga_select_algorithm(struct mempool_test_environment *env)
+{
+	MEMPOOL_ERR("unsupported algorithm %#x\n",
+		    env->algorithm.id);
+	return -EOPNOTSUPP;
+}
+
+static
+int mempool_fpga_total_algorithm(struct mempool_test_environment *env)
+{
+	MEMPOOL_ERR("unsupported algorithm %#x\n",
+		    env->algorithm.id);
+	return -EOPNOTSUPP;
+}
+
+static
+int mempool_execute_algorithm_by_fpga(struct mempool_test_environment *env)
+{
+	int err = 0;
+
+	MEMPOOL_DBG(env->show_debug,
+		    "algorithm %#x\n",
+		    env->algorithm.id);
+
+	switch (env->algorithm.id) {
+	case MEMPOOL_KEY_VALUE_ALGORITHM:
+		err = mempool_fpga_key_value_algorithm(env);
+		if (err) {
+			MEMPOOL_ERR("key-value algorithm failed: "
+				    "err %d\n", err);
+		}
+		break;
+
+	case MEMPOOL_SORT_ALGORITHM:
+		err = mempool_fpga_sort_algorithm(env);
+		if (err) {
+			MEMPOOL_ERR("sort algorithm failed: "
+				    "err %d\n", err);
+		}
+		break;
+
+	case MEMPOOL_SELECT_ALGORITHM:
+		err = mempool_fpga_select_algorithm(env);
+		if (err) {
+			MEMPOOL_ERR("select algorithm failed: "
+				    "err %d\n", err);
+		}
+		break;
+
+	case MEMPOOL_TOTAL_ALGORITHM:
+		err = mempool_fpga_total_algorithm(env);
+		if (err) {
+			MEMPOOL_ERR("total algorithm failed: "
+				    "err %d\n", err);
+		}
+		break;
+
+	default:
+		err = -EOPNOTSUPP;
+		MEMPOOL_ERR("unknown algorithm %#x\n",
+			    env->algorithm.id);
+		break;
+	}
+
+	MEMPOOL_DBG(env->show_debug,
+		    "algorithm %#x has been finished: "
+		    "err %d\n",
+		    env->algorithm.id, err);
+
+	return err;
+}
+
 int main(int argc, char *argv[])
 {
 	struct mempool_test_environment environment;
 	void *input_addr = NULL;
+	void *output_addr = NULL;
 	off_t file_size;
 	unsigned int portion_size;
 	int err = 0;
@@ -45,6 +151,11 @@ int main(int argc, char *argv[])
 	environment.input_file.fd = -1;
 	environment.input_file.stream = NULL;
 	environment.input_file.name = NULL;
+	environment.output_file.fd = -1;
+	environment.output_file.stream = NULL;
+	environment.output_file.name = NULL;
+	environment.threads.count = 0;
+	environment.threads.portion_size = 0;
 	environment.item.granularity = 1;
 	environment.record.capacity = 1;
 	environment.portion.capacity = 0;
@@ -74,12 +185,128 @@ int main(int argc, char *argv[])
 			environment.record.capacity;
 	portion_size *= environment.portion.capacity;
 
-/* TODO: Add logic */
+	if (environment.input_file.name) {
+		MEMPOOL_INFO("Open input file...\n");
+
+		environment.input_file.fd = open(environment.input_file.name,
+						 O_RDONLY, 0664);
+		if (environment.input_file.fd == -1) {
+			err = -ENOENT;
+			MEMPOOL_ERR("fail to open file: %s\n",
+				    strerror(errno));
+			goto finish_execution;
+		}
+
+		if (portion_size != environment.threads.portion_size) {
+			err = -ERANGE;
+			MEMPOOL_ERR("invalid request: "
+				    "portion_size %d, granularity %d, "
+				    "record_capacity %d, portion_capacity %d\n",
+				    environment.threads.portion_size,
+				    environment.item.granularity,
+				    environment.record.capacity,
+				    environment.portion.capacity);
+			goto close_files;
+		}
+
+		file_size = (off_t)environment.threads.count *
+				environment.threads.portion_size;
+
+		MEMPOOL_INFO("Mmap input file...\n");
+
+		input_addr = mmap(0, file_size, PROT_READ,
+				  MAP_SHARED|MAP_POPULATE,
+				  environment.input_file.fd, 0);
+		if (input_addr == MAP_FAILED) {
+			input_addr = NULL;
+			MEMPOOL_ERR("fail to mmap input file: %s\n",
+				    strerror(errno));
+			goto munmap_memory;
+		}
+
+		MEMPOOL_INFO("Write data into FPGA...\n");
+
+		err = mempool_write_data_into_fpga(&environment,
+						   input_addr,
+						   file_size);
+		if (err) {
+			MEMPOOL_ERR("fail to write data into FPGA board: "
+				    "file_size %lu, err %d\n",
+				    file_size, err);
+			goto munmap_memory;
+		}
+	} else if (environment.output_file.name) {
+		MEMPOOL_INFO("Open output file...\n");
+
+		environment.output_file.fd = open(environment.output_file.name,
+						  O_CREAT | O_RDWR, 0664);
+		if (environment.output_file.fd == -1) {
+			err = -ENOENT;
+			MEMPOOL_ERR("fail to open file: %s\n",
+				    strerror(errno));
+			goto finish_execution;
+		}
+
+		if (portion_size != environment.threads.portion_size) {
+			err = -ERANGE;
+			MEMPOOL_ERR("invalid request: "
+				    "portion_size %d, granularity %d, "
+				    "record_capacity %d, portion_capacity %d\n",
+				    environment.threads.portion_size,
+				    environment.item.granularity,
+				    environment.record.capacity,
+				    environment.portion.capacity);
+			goto close_files;
+		}
+
+		file_size = (off_t)environment.threads.count *
+				environment.threads.portion_size;
+
+		err = ftruncate(environment.output_file.fd, file_size);
+		if (err) {
+			MEMPOOL_ERR("fail to prepare output file: %s\n",
+				    strerror(errno));
+			goto close_files;
+		}
+
+		MEMPOOL_INFO("Mmap output file...\n");
+
+		output_addr = mmap(0, file_size, PROT_READ|PROT_WRITE,
+				  MAP_SHARED|MAP_POPULATE,
+				  environment.output_file.fd, 0);
+		if (output_addr == MAP_FAILED) {
+			output_addr = NULL;
+			MEMPOOL_ERR("fail to mmap output file: %s\n",
+				    strerror(errno));
+			goto close_files;
+		}
+
+		MEMPOOL_INFO("Read result from FPGA...\n");
+
+		err = mempool_read_result_from_fpga(&environment,
+						    output_addr,
+						    file_size);
+		if (err) {
+			MEMPOOL_ERR("fail to read result from FPGA board: "
+				    "file_size %lu, err %d\n",
+				    file_size, err);
+			goto munmap_memory;
+		}
+	} else {
+		MEMPOOL_INFO("Start executing algorithm...\n");
+
+		err = mempool_execute_algorithm_by_fpga(&environment);
+		if (err) {
+			MEMPOOL_ERR("fail to execute an algorithm by FPGA: "
+				    "err %d\n", err);
+			goto finish_execution;
+		}
+	}
 
 	MEMPOOL_DBG(environment.show_debug,
 		    "operation has been executed\n");
 
-
+munmap_memory:
 	if (input_addr) {
 		err = munmap(input_addr, file_size);
 		if (err) {
@@ -88,8 +315,20 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	if (output_addr) {
+		err = munmap(output_addr, file_size);
+		if (err) {
+			MEMPOOL_ERR("fail to unmap output file: %s\n",
+				    strerror(errno));
+		}
+	}
+
+close_files:
 	if (environment.input_file.fd != -1)
 		close(environment.input_file.fd);
+
+	if (environment.output_file.fd != -1)
+		close(environment.output_file.fd);
 
 finish_execution:
 	exit(err ? EXIT_FAILURE : EXIT_SUCCESS);

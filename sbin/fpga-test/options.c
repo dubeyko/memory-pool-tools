@@ -38,11 +38,18 @@ void print_usage(void)
 	MEMPOOL_INFO("Options:\n");
 	MEMPOOL_INFO("\t [-d|--debug]\t\t  show debug output.\n");
 	MEMPOOL_INFO("\t [-h|--help]\t\t  display help message and exit.\n");
-	MEMPOOL_INFO("\t [-i|--input-file]\t\t  save input file.\n");
-	MEMPOOL_INFO("\t [-I|--item granularity=value]\t\t  define item.\n");
-	MEMPOOL_INFO("\t [-r|--record capacity=value]\t\t  define record.\n");
+	MEMPOOL_INFO("\t [-i|--input-file]\t\t  write data from input file "
+		     "into FPGA board.\n");
+	MEMPOOL_INFO("\t [-o|--output-file]\t\t  extract result from FPGA "
+		     "board into output file.\n");
+	MEMPOOL_INFO("\t [-t|--fpga-core number=value, "
+		     "portion-size=value]\t\t  define FPGA cores info.\n");
+	MEMPOOL_INFO("\t [-I|--item granularity=value]\t\t  "
+		     "define size of item in bytes.\n");
+	MEMPOOL_INFO("\t [-r|--record capacity=value]\t\t  "
+		     "define number of items in record.\n");
 	MEMPOOL_INFO("\t [-p|--portion capacity=value,count=value]\t\t  "
-		     "define portion.\n");
+		     "define number of records in portion.\n");
 	MEMPOOL_INFO("\t [-k|--key mask=value]\t\t  define key.\n");
 	MEMPOOL_INFO("\t [-v|--value mask=value]\t\t  define value.\n");
 	MEMPOOL_INFO("\t [-c|--condition min=value,max=value]\t\t  "
@@ -58,17 +65,19 @@ void parse_options(int argc, char *argv[],
 	int c;
 	int oi = 1;
 	char *p;
-	char sopts[] = "a:c:dhi:I:p:k:r:v:V";
+	char sopts[] = "a:c:dhi:I:o:p:k:r:t:v:V";
 	static const struct option lopts[] = {
 		{"algorithm", 1, NULL, 'a'},
 		{"condition", 1, NULL, 'c'},
 		{"debug", 0, NULL, 'd'},
 		{"help", 0, NULL, 'h'},
 		{"input-file", 1, NULL, 'i'},
+		{"output-file", 1, NULL, 'o'},
 		{"item", 1, NULL, 'I'},
 		{"portion", 1, NULL, 'p'},
 		{"key", 1, NULL, 'k'},
 		{"record", 1, NULL, 'r'},
+		{"fpga-core", 1, NULL, 't'},
 		{"value", 1, NULL, 'v'},
 		{"version", 0, NULL, 'V'},
 		{ }
@@ -104,6 +113,15 @@ void parse_options(int argc, char *argv[],
 		NULL
 	};
 	enum {
+		THREAD_COUNT_OPT = 0,
+		THREAD_PORTION_SIZE_OPT,
+	};
+	char *const threads_tokens[] = {
+		[THREAD_COUNT_OPT]		= "number",
+		[THREAD_PORTION_SIZE_OPT]	= "portion-size",
+		NULL
+	};
+	enum {
 		VALUE_MASK_OPT = 0,
 	};
 	char *const value_tokens[] = {
@@ -135,6 +153,33 @@ void parse_options(int argc, char *argv[],
 				print_usage();
 				exit(EXIT_SUCCESS);
 			}
+			break;
+		case 'o':
+			env->output_file.name = optarg;
+			if (!env->output_file.name) {
+				MEMPOOL_ERR("output file is absent\n");
+				print_usage();
+				exit(EXIT_SUCCESS);
+			}
+			break;
+		case 't':
+			p = optarg;
+			while (*p != '\0') {
+				char *value;
+
+				switch (getsubopt(&p, threads_tokens, &value)) {
+				case THREAD_COUNT_OPT:
+					env->threads.count = atoi(value);
+					break;
+				case THREAD_PORTION_SIZE_OPT:
+					env->threads.portion_size = atoi(value);
+					break;
+				default:
+					MEMPOOL_ERR("invalid threads option\n");
+					print_usage();
+					exit(EXIT_FAILURE);
+				};
+			};
 			break;
 		case 'I':
 			p = optarg;
