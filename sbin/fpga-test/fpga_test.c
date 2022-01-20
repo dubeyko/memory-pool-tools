@@ -31,15 +31,280 @@
 #include <limits.h>
 #include <errno.h>
 #include <pthread.h>
+#include <termios.h>
 
+#include "uart_declarations.h"
 #include "fpga_test.h"
+
+static
+int mempool_open_channel_to_fpga(struct mempool_test_environment *env)
+{
+	MEMPOOL_DBG(env->show_debug,
+		    "env %p\n",
+		    env);
+
+	env->uart_channel.fd = open(env->uart_channel.name,
+				    O_RDWR | O_NOCTTY | O_NDELAY);
+	if (env->uart_channel.fd == -1) {
+		MEMPOOL_ERR("fail to open UART channel: %s\n",
+			    strerror(errno));
+		return -EFAULT;
+	}
+
+	MEMPOOL_DBG(env->show_debug,
+		    "UART channel has been opened\n");
+
+	return 0;
+}
+
+static int
+mempool_configure_communication_parameters(struct mempool_test_environment *env)
+{
+	struct termios config;
+
+	MEMPOOL_DBG(env->show_debug,
+		    "env %p\n",
+		    env);
+
+	if (tcgetattr(env->uart_channel.fd, &config) < 0) {
+		MEMPOOL_ERR("fail to get current configuration: %s\n",
+			    strerror(errno));
+		return -EFAULT;
+	}
+
+	//
+	// Input flags - Turn off input processing
+	//
+	// convert break to null byte, no CR to NL translation,
+	// no NL to CR translation, don't mark parity errors or breaks
+	// no input parity check, don't strip high bit off,
+	// no XON/XOFF software flow control
+	//
+	config.c_iflag &= ~(IGNBRK | BRKINT | ICRNL |
+				INLCR | PARMRK | INPCK | ISTRIP | IXON);
+
+	//
+	// Output flags - Turn off output processing
+	//
+	// no CR to NL translation, no NL to CR-NL translation,
+	// no NL to CR translation, no column 0 CR suppression,
+	// no Ctrl-D suppression, no fill characters, no case mapping,
+	// no local output processing
+	//
+	// config.c_oflag &= ~(OCRNL | ONLCR | ONLRET |
+	//                     ONOCR | ONOEOT| OFILL | OLCUC | OPOST);
+	config.c_oflag = 0;
+
+	//
+	// No line processing
+	//
+	// echo off, echo newline off, canonical mode off,
+	// extended input processing off, signal chars off
+	//
+	config.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN | ISIG);
+
+	//
+	// Turn off character processing
+	//
+	// clear current char size mask, no parity checking,
+	// no output processing, force 8 bit input
+	//
+	config.c_cflag &= ~(CSIZE | PARENB);
+	config.c_cflag |= CS8;
+
+	//
+	// One input byte is enough to return from read()
+	// Inter-character timer off
+	//
+	config.c_cc[VMIN]  = 1;
+	config.c_cc[VTIME] = 0;
+
+	//
+	// Communication speed (simple version, using the predefined
+	// constants)
+	//
+	if (cfsetispeed(&config, B115200) < 0 ||
+	    cfsetospeed(&config, B115200) < 0) {
+		MEMPOOL_ERR("fail to set speed of communication: %s\n",
+			    strerror(errno));
+		return -EFAULT;
+	}
+
+	if (tcsetattr(env->uart_channel.fd, TCSAFLUSH, &config) < 0) {
+		MEMPOOL_ERR("fail to set configuration of communication: %s\n",
+			    strerror(errno));
+		return -EFAULT;
+	}
+
+	MEMPOOL_DBG(env->show_debug,
+		    "UART channel has been configured\n");
+
+	return 0;
+}
+
+static
+int mempool_close_channel_to_fpga(struct mempool_test_environment *env)
+{
+	MEMPOOL_DBG(env->show_debug,
+		    "env %p\n",
+		    env);
+
+	if (env->uart_channel.fd != -1) {
+		close(env->uart_channel.fd);
+	} else {
+		MEMPOOL_ERR("UART channel's file descriptor invalid\n");
+		return -ERANGE;
+	}
+
+	MEMPOOL_DBG(env->show_debug,
+		    "UART channel has been closed\n");
+
+	return 0;
+}
+
+static
+int mempool_send_preamble(struct mempool_test_environment *env,
+			  unsigned char magic,
+			  unsigned long long base_address,
+			  int page_index,
+			  unsigned char operation_type)
+{
+	struct mempool_uart_preamble preamble = {0};
+	ssize_t written_bytes;
+	size_t bytes_count = sizeof(struct mempool_uart_preamble);
+	int err;
+
+	MEMPOOL_DBG(env->show_debug,
+		    "env %p\n",
+		    env);
+
+	preamble.magic = magic;
+	preamble.address = base_address + page_index;
+	preamble.operation_type = operation_type;
+
+	written_bytes = write(env->uart_channel.fd,
+			      &preamble, bytes_count);
+	if (written_bytes < 0) {
+		MEMPOOL_ERR("fail to send preamble into FPGA: %s\n",
+			    strerror(errno));
+		return -EFAULT;
+	} else if (written_bytes != bytes_count) {
+		MEMPOOL_ERR("written_bytes %zd != bytes_count %zu\n",
+			    written_bytes, bytes_count);
+		return -EFAULT;
+	}
+
+	MEMPOOL_DBG(env->show_debug,
+		    "preamble has been sent to FPGA\n");
+
+	return err;
+}
+
+static
+int __mempool_write_data_into_fpga(struct mempool_test_environment *env,
+				   void *input_addr, off_t file_size)
+{
+	ssize_t written_bytes = 0;
+	int err = -ENODATA;
+
+	MEMPOOL_DBG(env->show_debug,
+		    "input_addr %p, file_size %lu\n",
+		    input_addr, file_size);
+
+	while (written_bytes < file_size) {
+		off_t bytes_count;
+		ssize_t sent_bytes;
+		off_t page_index = written_bytes / MEMPOOL_PAGE_SIZE;
+
+		bytes_count = file_size - written_bytes;
+		if (bytes_count > MEMPOOL_PAGE_SIZE)
+			bytes_count = MEMPOOL_PAGE_SIZE;
+
+		err = mempool_send_preamble(env,
+					    MEMPOOL_PC2FPGA_MAGIC,
+					    MEMPOOL_INPUT_DATA_BASE_ADDRESS,
+					    page_index,
+					    MEMPOOL_WRITE_4K_INPUT_DATA);
+		if (err) {
+			MEMPOOL_ERR("fail to send preable into FPGA: err %d\n",
+				    err);
+			goto finish_write_data_into_fpga;
+		}
+
+		sent_bytes = write(env->uart_channel.fd,
+				   (unsigned char *)input_addr + written_bytes,
+				   bytes_count);
+		if (sent_bytes < 0) {
+			err = -EFAULT;
+			MEMPOOL_ERR("fail to write into FPGA: %s\n",
+				    strerror(errno));
+			goto finish_write_data_into_fpga;
+		} else if (sent_bytes != bytes_count) {
+			err = -EFAULT;
+			MEMPOOL_ERR("sent_bytes %zd != bytes_count %lu\n",
+				    sent_bytes, bytes_count);
+			goto finish_write_data_into_fpga;
+		}
+
+		err = tcdrain(env->uart_channel.fd);
+		if (err) {
+			err = -EFAULT;
+			MEMPOOL_ERR("wait function failed: %s\n",
+				    strerror(errno));
+			goto finish_write_data_into_fpga;
+		}
+
+		written_bytes += bytes_count;
+	};
+
+	MEMPOOL_DBG(env->show_debug,
+		    "data stream has been sent to FPGA\n");
+
+finish_write_data_into_fpga:
+	return err;
+}
+
 
 static
 int mempool_write_data_into_fpga(struct mempool_test_environment *env,
 				 void *input_addr, off_t file_size)
 {
-	MEMPOOL_ERR("unsupported algorithm\n");
-	return -EOPNOTSUPP;
+	int err = 0;
+
+	MEMPOOL_DBG(env->show_debug,
+		    "input_addr %p, file_size %lu\n",
+		    input_addr, file_size);
+
+	err = mempool_open_channel_to_fpga(env);
+	if (err) {
+		MEMPOOL_ERR("fail to open channel to FPGA: "
+			    "err %d\n", err);
+		return err;
+	}
+
+	err = mempool_configure_communication_parameters(env);
+	if (err) {
+		MEMPOOL_ERR("fail to configure communication parameters: "
+			    "err %d\n", err);
+		goto close_channel;
+	}
+
+	err = __mempool_write_data_into_fpga(env, input_addr, file_size);
+	if (err) {
+		MEMPOOL_ERR("fail to write data into FPGA: "
+			    "file_size %lu, err %d\n",
+			    file_size, err);
+		goto close_channel;
+	}
+
+close_channel:
+	mempool_close_channel_to_fpga(env);
+
+	MEMPOOL_DBG(env->show_debug,
+		    "write operation has been finished: "
+		    "err %d\n", err);
+
+	return err;
 }
 
 static
@@ -154,6 +419,9 @@ int main(int argc, char *argv[])
 	environment.output_file.fd = -1;
 	environment.output_file.stream = NULL;
 	environment.output_file.name = NULL;
+	environment.uart_channel.fd = -1;
+	environment.uart_channel.stream = NULL;
+	environment.uart_channel.name = NULL;
 	environment.threads.count = 0;
 	environment.threads.portion_size = 0;
 	environment.item.granularity = 1;

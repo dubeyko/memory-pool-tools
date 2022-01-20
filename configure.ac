@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: BSD-3-Clause-Clear
 
 AC_PREREQ([2.69])
-AC_INIT(memory-pool-tools, 0.09, slava@dubeyko.com)
+AC_INIT(memory-pool-tools, 0.10, slava@dubeyko.com)
 AM_INIT_AUTOMAKE
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])

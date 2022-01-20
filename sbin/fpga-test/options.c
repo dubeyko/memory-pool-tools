@@ -42,6 +42,7 @@ void print_usage(void)
 		     "into FPGA board.\n");
 	MEMPOOL_INFO("\t [-o|--output-file]\t\t  extract result from FPGA "
 		     "board into output file.\n");
+	MEMPOOL_INFO("\t [-U|--uart-device]\t\t  define UART device name.\n");
 	MEMPOOL_INFO("\t [-t|--fpga-core number=value, "
 		     "portion-size=value]\t\t  define FPGA cores info.\n");
 	MEMPOOL_INFO("\t [-I|--item granularity=value]\t\t  "
@@ -65,7 +66,7 @@ void parse_options(int argc, char *argv[],
 	int c;
 	int oi = 1;
 	char *p;
-	char sopts[] = "a:c:dhi:I:o:p:k:r:t:v:V";
+	char sopts[] = "a:c:dhi:I:o:p:k:r:t:U:v:V";
 	static const struct option lopts[] = {
 		{"algorithm", 1, NULL, 'a'},
 		{"condition", 1, NULL, 'c'},
@@ -73,6 +74,7 @@ void parse_options(int argc, char *argv[],
 		{"help", 0, NULL, 'h'},
 		{"input-file", 1, NULL, 'i'},
 		{"output-file", 1, NULL, 'o'},
+		{"uart-device", 1, NULL, 'U'},
 		{"item", 1, NULL, 'I'},
 		{"portion", 1, NULL, 'p'},
 		{"key", 1, NULL, 'k'},
@@ -158,6 +160,14 @@ void parse_options(int argc, char *argv[],
 			env->output_file.name = optarg;
 			if (!env->output_file.name) {
 				MEMPOOL_ERR("output file is absent\n");
+				print_usage();
+				exit(EXIT_SUCCESS);
+			}
+			break;
+		case 'U':
+			env->uart_channel.name = optarg;
+			if (!env->uart_channel.name) {
+				MEMPOOL_ERR("UART device is not defined\n");
 				print_usage();
 				exit(EXIT_SUCCESS);
 			}

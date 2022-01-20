@@ -136,6 +136,7 @@ struct mempool_algorithm_descriptor {
  * struct mempool_test_environment - test's environment
  * @input_file: input file
  * @output_file: output file
+ * @uart_channel: UART channel
  * @threads: threads descriptor
  * @item: item descriptor
  * @record: record descriptor
@@ -148,6 +149,7 @@ struct mempool_algorithm_descriptor {
 struct mempool_test_environment {
 	struct mempool_file_descriptor input_file;
 	struct mempool_file_descriptor output_file;
+	struct mempool_file_descriptor uart_channel;
 	struct mempool_threads_descriptor threads;
 	struct mempool_item_descriptor item;
 	struct mempool_record_descriptor record;

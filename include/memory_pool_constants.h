@@ -21,6 +21,7 @@
 #define MEMPOOL_FALSE (0)
 
 #define MEMPOOL_BITS_PER_BYTE	(8)
+#define MEMPOOL_PAGE_SIZE	(4096)
 
 /* algorithm ID */
 enum {

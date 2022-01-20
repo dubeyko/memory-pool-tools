@@ -6,4 +6,5 @@ AM_CPPFLAGS = -I$(top_srcdir)/include
 
 sbin_PROGRAMS = fpga-test
 
-fpga_test_SOURCES = options.c fpga_test.c fpga_test.h
+fpga_test_SOURCES = options.c uart_declarations.h \
+			fpga_test.c fpga_test.h
