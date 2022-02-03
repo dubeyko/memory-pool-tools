@@ -3,4 +3,4 @@
 
 #include_HEADERS =
 noinst_HEADERS = memory_pool_tools.h memory_pool_constants.h \
-		 version.h
+		 crc32c.h version.h

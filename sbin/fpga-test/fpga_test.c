@@ -34,6 +34,8 @@
 #include <termios.h>
 
 #include "uart_declarations.h"
+#include "metadata_page.h"
+#include "crc32c.h"
 #include "fpga_test.h"
 
 static
@@ -167,7 +169,9 @@ int mempool_send_preamble(struct mempool_test_environment *env,
 			  unsigned char magic,
 			  unsigned long long base_address,
 			  int page_index,
-			  unsigned char operation_type)
+			  unsigned char operation_type,
+			  unsigned int checksum,
+			  unsigned short length)
 {
 	struct mempool_uart_preamble preamble = {0};
 	ssize_t written_bytes;
@@ -179,8 +183,10 @@ int mempool_send_preamble(struct mempool_test_environment *env,
 		    env);
 
 	preamble.magic = magic;
-	preamble.address = base_address + page_index;
 	preamble.operation_type = operation_type;
+	preamble.length = length;
+	preamble.crc32 = checksum;
+	preamble.address = base_address + page_index;
 
 	written_bytes = write(env->uart_channel.fd,
 			      &preamble, bytes_count);
@@ -201,7 +207,46 @@ int mempool_send_preamble(struct mempool_test_environment *env,
 }
 
 static
+int mempool_send_footer(struct mempool_test_environment *env,
+			unsigned char magic,
+			unsigned char operation_type,
+			unsigned int checksum)
+{
+	struct mempool_uart_footer footer = {0};
+	ssize_t written_bytes;
+	size_t bytes_count = sizeof(struct mempool_uart_footer);
+	int err;
+
+	MEMPOOL_DBG(env->show_debug,
+		    "env %p\n",
+		    env);
+
+	footer.magic = magic;
+	footer.operation_type = operation_type;
+	footer.crc32 = checksum;
+
+	written_bytes = write(env->uart_channel.fd,
+			      &footer, bytes_count);
+	if (written_bytes < 0) {
+		MEMPOOL_ERR("fail to send footer into FPGA: %s\n",
+			    strerror(errno));
+		return -EFAULT;
+	} else if (written_bytes != bytes_count) {
+		MEMPOOL_ERR("written_bytes %zd != bytes_count %zu\n",
+			    written_bytes, bytes_count);
+		return -EFAULT;
+	}
+
+	MEMPOOL_DBG(env->show_debug,
+		    "footer has been sent to FPGA\n");
+
+	return err;
+}
+
+static
 int __mempool_write_data_into_fpga(struct mempool_test_environment *env,
+				   unsigned long long base_address,
+				   unsigned char operation_type,
 				   void *input_addr, off_t file_size)
 {
 	ssize_t written_bytes = 0;
@@ -215,16 +260,25 @@ int __mempool_write_data_into_fpga(struct mempool_test_environment *env,
 		off_t bytes_count;
 		ssize_t sent_bytes;
 		off_t page_index = written_bytes / MEMPOOL_PAGE_SIZE;
+		unsigned int checksum;
 
 		bytes_count = file_size - written_bytes;
 		if (bytes_count > MEMPOOL_PAGE_SIZE)
 			bytes_count = MEMPOOL_PAGE_SIZE;
 
+		checksum = crc32c(~0L,
+				  (const void *)((unsigned char *)input_addr +
+								written_bytes),
+				  bytes_count);
+		checksum ^= ~0L;
+
 		err = mempool_send_preamble(env,
 					    MEMPOOL_PC2FPGA_MAGIC,
-					    MEMPOOL_INPUT_DATA_BASE_ADDRESS,
+					    base_address,
 					    page_index,
-					    MEMPOOL_WRITE_4K_INPUT_DATA);
+					    operation_type,
+					    checksum,
+					    bytes_count);
 		if (err) {
 			MEMPOOL_ERR("fail to send preable into FPGA: err %d\n",
 				    err);
@@ -246,6 +300,16 @@ int __mempool_write_data_into_fpga(struct mempool_test_environment *env,
 			goto finish_write_data_into_fpga;
 		}
 
+		err = mempool_send_footer(env,
+					  MEMPOOL_PC2FPGA_MAGIC,
+					  operation_type,
+					  checksum);
+		if (err) {
+			MEMPOOL_ERR("fail to send footer into FPGA: err %d\n",
+				    err);
+			goto finish_write_data_into_fpga;
+		}
+
 		err = tcdrain(env->uart_channel.fd);
 		if (err) {
 			err = -EFAULT;
@@ -263,7 +327,6 @@ int __mempool_write_data_into_fpga(struct mempool_test_environment *env,
 finish_write_data_into_fpga:
 	return err;
 }
-
 
 static
 int mempool_write_data_into_fpga(struct mempool_test_environment *env,
@@ -289,7 +352,10 @@ int mempool_write_data_into_fpga(struct mempool_test_environment *env,
 		goto close_channel;
 	}
 
-	err = __mempool_write_data_into_fpga(env, input_addr, file_size);
+	err = __mempool_write_data_into_fpga(env,
+					     MEMPOOL_INPUT_DATA_BASE_ADDRESS,
+					     MEMPOOL_WRITE_INPUT_DATA,
+					     input_addr, file_size);
 	if (err) {
 		MEMPOOL_ERR("fail to write data into FPGA: "
 			    "file_size %lu, err %d\n",
@@ -316,35 +382,122 @@ int mempool_read_result_from_fpga(struct mempool_test_environment *env,
 }
 
 static
+int __mempool_fpga_execute_algorithm(struct mempool_test_environment *env)
+{
+	struct mempool_metadata_management *array = NULL;
+	struct mempool_metadata_management *item = NULL;
+	size_t item_size = sizeof(struct mempool_metadata_management);
+	size_t array_size = (size_t)env->threads.count * item_size;
+	int i;
+	int err = 0;
+
+	MEMPOOL_DBG(env->show_debug,
+		    "algorithm %#x\n",
+		    env->algorithm.id);
+
+	array = calloc(env->threads.count, item_size);
+	if (!array) {
+		err = -ENOMEM;
+		MEMPOOL_ERR("fail to allocate buffer: "
+			    "%s\n",
+			    strerror(errno));
+		goto finish_alghorithm;
+	}
+
+	for (i = 0; i < env->threads.count; i++) {
+		item = &array[i];
+
+		item->request.portion.type.granularity = env->item.granularity;
+		item->request.portion.type.capacity = env->record.capacity;
+		item->request.portion.count = env->portion.count;
+		item->request.portion.capacity = env->portion.capacity;
+		item->request.key.mask = env->key.mask;
+		item->request.value.mask = env->value.mask;
+		item->request.condition.min = env->condition.min;
+		item->request.condition.max = env->condition.max;
+		item->request.algorithm.code = env->algorithm.id;
+		item->request.algorithm.start = 0;
+		item->request.algorithm.end = env->portion.capacity;
+	}
+
+	err = mempool_open_channel_to_fpga(env);
+	if (err) {
+		MEMPOOL_ERR("fail to open channel to FPGA: "
+			    "err %d\n", err);
+		goto free_array;
+	}
+
+	err = mempool_configure_communication_parameters(env);
+	if (err) {
+		MEMPOOL_ERR("fail to configure communication parameters: "
+			    "err %d\n", err);
+		goto close_channel;
+	}
+
+	err = __mempool_write_data_into_fpga(env,
+				     MEMPOOL_MANAGEMENT_PAGE_BASE_ADDRESS,
+				     MEMPOOL_SEND_MANAGEMENT_PAGE,
+				     array, array_size);
+	if (err) {
+		MEMPOOL_ERR("fail to write data into FPGA: "
+			    "array_size %zu, err %d\n",
+			    array_size, err);
+		goto close_channel;
+	}
+
+close_channel:
+	mempool_close_channel_to_fpga(env);
+
+free_array:
+	if (array)
+		free(array);
+
+finish_alghorithm:
+	MEMPOOL_DBG(env->show_debug,
+		    "key-value algorithm has been finished: "
+		    "err %d\n", err);
+
+	return err;
+}
+
+static
 int mempool_fpga_key_value_algorithm(struct mempool_test_environment *env)
 {
-	MEMPOOL_ERR("unsupported algorithm %#x\n",
+	MEMPOOL_DBG(env->show_debug,
+		    "algorithm %#x\n",
 		    env->algorithm.id);
-	return -EOPNOTSUPP;
+
+	return __mempool_fpga_execute_algorithm(env);
 }
 
 static
 int mempool_fpga_sort_algorithm(struct mempool_test_environment *env)
 {
-	MEMPOOL_ERR("unsupported algorithm %#x\n",
+	MEMPOOL_DBG(env->show_debug,
+		    "algorithm %#x\n",
 		    env->algorithm.id);
-	return -EOPNOTSUPP;
+
+	return __mempool_fpga_execute_algorithm(env);
 }
 
 static
 int mempool_fpga_select_algorithm(struct mempool_test_environment *env)
 {
-	MEMPOOL_ERR("unsupported algorithm %#x\n",
+	MEMPOOL_DBG(env->show_debug,
+		    "algorithm %#x\n",
 		    env->algorithm.id);
-	return -EOPNOTSUPP;
+
+	return __mempool_fpga_execute_algorithm(env);
 }
 
 static
 int mempool_fpga_total_algorithm(struct mempool_test_environment *env)
 {
-	MEMPOOL_ERR("unsupported algorithm %#x\n",
+	MEMPOOL_DBG(env->show_debug,
+		    "algorithm %#x\n",
 		    env->algorithm.id);
-	return -EOPNOTSUPP;
+
+	return __mempool_fpga_execute_algorithm(env);
 }
 
 static
