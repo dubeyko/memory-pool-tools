@@ -55,7 +55,7 @@ struct mempool_uart_preamble {
 	unsigned long long address;
 
 /* 0x0010 */
-}  __attribute__((packed));
+} __attribute__((packed));
 
 /*
  * struct mempool_uart_footer - UART packet footer
@@ -73,6 +73,25 @@ struct mempool_uart_footer {
 	unsigned int crc32;
 
 /* 0x0008 */
-}  __attribute__((packed));
+} __attribute__((packed));
+
+/*
+ * struct mempool_uart_answer - FPGA UART answer preamble
+ * @magic: answer magic
+ * @result: operation result
+ * @length: payload length
+ * @crc32: payload's checksum
+ */
+struct mempool_uart_answer {
+/* 0x0000 */
+	unsigned char magic;
+	unsigned char result;
+	unsigned short length;
+
+/* 0x0004 */
+	unsigned int crc32;
+
+/* 0x0008 */
+} __attribute__((packed));
 
 #endif /* _UART_DECLARATIONS_H */

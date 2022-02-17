@@ -176,7 +176,6 @@ int mempool_send_preamble(struct mempool_test_environment *env,
 	struct mempool_uart_preamble preamble = {0};
 	ssize_t written_bytes;
 	size_t bytes_count = sizeof(struct mempool_uart_preamble);
-	int err;
 
 	MEMPOOL_DBG(env->show_debug,
 		    "env %p\n",
@@ -203,7 +202,7 @@ int mempool_send_preamble(struct mempool_test_environment *env,
 	MEMPOOL_DBG(env->show_debug,
 		    "preamble has been sent to FPGA\n");
 
-	return err;
+	return 0;
 }
 
 static
@@ -215,7 +214,6 @@ int mempool_send_footer(struct mempool_test_environment *env,
 	struct mempool_uart_footer footer = {0};
 	ssize_t written_bytes;
 	size_t bytes_count = sizeof(struct mempool_uart_footer);
-	int err;
 
 	MEMPOOL_DBG(env->show_debug,
 		    "env %p\n",
@@ -240,7 +238,61 @@ int mempool_send_footer(struct mempool_test_environment *env,
 	MEMPOOL_DBG(env->show_debug,
 		    "footer has been sent to FPGA\n");
 
-	return err;
+	return 0;
+}
+
+static
+int mempool_read_fpga_status(struct mempool_test_environment *env)
+{
+	struct mempool_uart_answer answer = {0};
+	ssize_t read_bytes = 0;
+
+	MEMPOOL_DBG(env->show_debug,
+		    "env %p\n",
+		    env);
+
+	do {
+		read_bytes = read(env->uart_channel.fd, &answer.magic,
+				  sizeof(unsigned char));
+		if (read_bytes != sizeof(unsigned char)) {
+			MEMPOOL_ERR("fail to read answer from FPGA\n");
+			return -EFAULT;
+		}
+
+		if (answer.magic == MEMPOOL_FPGA2PC_MAGIC)
+			break;
+	} while (read_bytes > 0);
+
+	read_bytes = read(env->uart_channel.fd, &answer.result,
+			  sizeof(unsigned char));
+	if (read_bytes != sizeof(unsigned char)) {
+		MEMPOOL_ERR("fail to read answer from FPGA\n");
+		return -EFAULT;
+	}
+
+	read_bytes = read(env->uart_channel.fd, &answer.length,
+			  sizeof(unsigned short));
+	if (read_bytes != sizeof(unsigned short)) {
+		MEMPOOL_ERR("fail to read answer from FPGA\n");
+		return -EFAULT;
+	}
+
+	read_bytes = read(env->uart_channel.fd, &answer.crc32,
+			  sizeof(unsigned int));
+	if (read_bytes != sizeof(unsigned int)) {
+		MEMPOOL_ERR("fail to read answer from FPGA\n");
+		return -EFAULT;
+	}
+
+	MEMPOOL_DBG(env->show_debug,
+		    "answer has been read from FPGA\n");
+
+	if (answer.result != 0) {
+		MEMPOOL_ERR("FPGA operation has failed\n");
+		return -EFAULT;
+	}
+
+	return 0;
 }
 
 static
@@ -363,6 +415,13 @@ int mempool_write_data_into_fpga(struct mempool_test_environment *env,
 		goto close_channel;
 	}
 
+	err = mempool_read_fpga_status(env);
+	if (err) {
+		MEMPOOL_ERR("write operation failed: "
+			    "err %d\n", err);
+		goto close_channel;
+	}
+
 close_channel:
 	mempool_close_channel_to_fpga(env);
 
@@ -374,11 +433,147 @@ close_channel:
 }
 
 static
+int __mempool_read_result_from_fpga(struct mempool_test_environment *env,
+				    void *output_addr, off_t file_size)
+{
+	struct mempool_uart_answer answer = {0};
+	ssize_t read_bytes = 0;
+	ssize_t checked_bytes = 0;
+	unsigned int checksum = 0;
+
+	MEMPOOL_DBG(env->show_debug,
+		    "output_addr %p, file_size %lu\n",
+		    output_addr, file_size);
+
+	do {
+		read_bytes = read(env->uart_channel.fd, &answer.magic,
+				  sizeof(unsigned char));
+		if (read_bytes != sizeof(unsigned char)) {
+			MEMPOOL_ERR("fail to read answer from FPGA\n");
+			return -EFAULT;
+		}
+
+		if (answer.magic == MEMPOOL_FPGA2PC_MAGIC)
+			break;
+	} while (read_bytes > 0);
+
+	read_bytes = read(env->uart_channel.fd, &answer.result,
+			  sizeof(unsigned char));
+	if (read_bytes != sizeof(unsigned char)) {
+		MEMPOOL_ERR("fail to read answer from FPGA\n");
+		return -EFAULT;
+	}
+
+	read_bytes = read(env->uart_channel.fd, &answer.length,
+			  sizeof(unsigned short));
+	if (read_bytes != sizeof(unsigned short)) {
+		MEMPOOL_ERR("fail to read answer from FPGA\n");
+		return -EFAULT;
+	}
+
+	read_bytes = read(env->uart_channel.fd, &answer.crc32,
+			  sizeof(unsigned int));
+	if (read_bytes != sizeof(unsigned int)) {
+		MEMPOOL_ERR("fail to read answer from FPGA\n");
+		return -EFAULT;
+	}
+
+	MEMPOOL_DBG(env->show_debug,
+		    "answer has been read from FPGA\n");
+
+	if (answer.result != 0) {
+		MEMPOOL_ERR("FPGA operation has failed\n");
+		return -EFAULT;
+	}
+
+	if (answer.length > file_size) {
+		MEMPOOL_ERR("answer.length %u > file_size %lu\n",
+			    answer.length, file_size);
+		return -EFAULT;
+	}
+
+	read_bytes = read(env->uart_channel.fd, output_addr,
+			  answer.length);
+	if (read_bytes != answer.length) {
+		MEMPOOL_ERR("fail to read result data from FPGA\n");
+		return -EFAULT;
+	}
+
+	while (checked_bytes < read_bytes) {
+		off_t bytes_count;
+
+		bytes_count = read_bytes - checked_bytes;
+		if (bytes_count > MEMPOOL_PAGE_SIZE)
+			bytes_count = MEMPOOL_PAGE_SIZE;
+
+		checksum = crc32c(~0L,
+				  (const void *)((unsigned char *)output_addr +
+								checked_bytes),
+				  bytes_count);
+		checksum ^= ~0L;
+	}
+
+	if (checksum != answer.crc32) {
+		MEMPOOL_ERR("checksum %u != answer.crc32 %u\n",
+			    checksum, answer.crc32);
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
+static
 int mempool_read_result_from_fpga(struct mempool_test_environment *env,
 				  void *output_addr, off_t file_size)
 {
-	MEMPOOL_ERR("unsupported algorithm\n");
-	return -EOPNOTSUPP;
+	int err = 0;
+
+	MEMPOOL_DBG(env->show_debug,
+		    "output_addr %p, file_size %lu\n",
+		    output_addr, file_size);
+
+	err = mempool_open_channel_to_fpga(env);
+	if (err) {
+		MEMPOOL_ERR("fail to open channel to FPGA: "
+			    "err %d\n", err);
+		return err;
+	}
+
+	err = mempool_configure_communication_parameters(env);
+	if (err) {
+		MEMPOOL_ERR("fail to configure communication parameters: "
+			    "err %d\n", err);
+		goto close_channel;
+	}
+
+	err = mempool_send_preamble(env,
+				    MEMPOOL_PC2FPGA_MAGIC,
+				    0,
+				    0,
+				    MEMPOOL_READ_RESULT,
+				    0,
+				    0);
+	if (err) {
+		MEMPOOL_ERR("fail to send preable into FPGA: err %d\n",
+			    err);
+		goto close_channel;
+	}
+
+	err = __mempool_read_result_from_fpga(env, output_addr, file_size);
+	if (err) {
+		MEMPOOL_ERR("fail to read result form FPGA: err %d\n",
+			    err);
+		goto close_channel;
+	}
+
+close_channel:
+	mempool_close_channel_to_fpga(env);
+
+	MEMPOOL_DBG(env->show_debug,
+		    "read operation has been finished: "
+		    "err %d\n", err);
+
+	return err;
 }
 
 static
@@ -443,6 +638,25 @@ int __mempool_fpga_execute_algorithm(struct mempool_test_environment *env)
 			    "array_size %zu, err %d\n",
 			    array_size, err);
 		goto close_channel;
+	}
+
+	err = __mempool_read_result_from_fpga(env, array, array_size);
+	if (err) {
+		MEMPOOL_ERR("fail to read result form FPGA: err %d\n",
+			    err);
+		goto close_channel;
+	}
+
+	for (i = 0; i < env->threads.count; i++) {
+		item = &array[i];
+
+		if (item->result.err) {
+			MEMPOOL_ERR("FPGA core %d failed: err %d\n",
+				    i, item->result.err);
+		} else {
+			MEMPOOL_INFO("FPGA core %d result state %#x\n",
+				     i, item->result.state);
+		}
 	}
 
 close_channel:

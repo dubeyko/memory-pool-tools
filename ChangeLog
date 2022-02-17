@@ -2,6 +2,9 @@
 *                            CHANGELOG SECTION                                 *
 ********************************************************************************
 
+v.0.12 [February 17, 2022]
+    (*) [fpga-test] Implement logic of retrieving data from FPGA.
+
 v.0.11 [February 02, 2022]
     (*) [fpga-test] Implement algorithm execution logic.
 
